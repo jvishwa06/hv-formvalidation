@@ -6,7 +6,6 @@ REPO_NAME="form-validation-ecr"
 IMAGE_TAG="latest"
 FUNCTION_NAME="form-validation-lambda"
 PYTHON_VERSION="3.10"
-ROLE_ARN="arn:aws:iam::855341045026:role/lambda-execution-role"
 
 export DOCKER_DEFAULT_PLATFORM=linux/amd64
 
