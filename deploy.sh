@@ -4,8 +4,6 @@ set -e
 AWS_REGION="us-east-1"
 REPO_NAME="form-validation-ecr"
 IMAGE_TAG="latest"
-FUNCTION_NAME="form-validation-lambda"
-PYTHON_VERSION="3.10"
 
 export DOCKER_DEFAULT_PLATFORM=linux/amd64
 
