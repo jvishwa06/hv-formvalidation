@@ -17,17 +17,13 @@ class FormValidatorUser(HttpUser):
             with open(self.pdf_file_path, 'rb') as pdf_file:
                 files = {'file': ('sample3.pdf', pdf_file, 'application/pdf')}
                 
-                response = self.client.post("/prod/v1/validate-application",files=files,name="validate-application")
+                response = self.client.post("/v1/validate-application", files=files, name="validate-application")
                 
                 if response.status_code != 200:
                     print(f"Request failed with status {response.status_code}: {response.text}")
                 
         except Exception as e:
             print(f"Error during request: {str(e)}")
-            self.client.post("/prod/v1/validate-application", 
-                           name="validate-application", 
-                           catch_response=True).failure(f"Exception: {str(e)}")
 
 
-
-# locust -f locustfile.py --host=https://85vh3ypjr1.execute-api.us-east-1.amazonaws.com
+# locust -f locustfile.py --host=https://jnozfnu4em3xc2z2tv26vbq3xi0rjycr.lambda-url.us-east-1.on.aws
