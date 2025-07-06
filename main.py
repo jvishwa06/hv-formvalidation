@@ -16,7 +16,6 @@ from concurrent.futures import ThreadPoolExecutor
 from logging import StreamHandler
 
 MAX_FILE_SIZE_MB = 10
-REQUIRED_PAGE_COUNT = 3
 TEXT_SIMILARITY_THRESHOLD = 80
 FACE_SIMILARITY_THRESHOLD = 0.7
 
@@ -38,13 +37,14 @@ handler = Mangum(app)
 @app.middleware("http")
 async def request_timing_middleware(request: Request, call_next):
     start_time = time.perf_counter()
+    request.state.start_time = start_time
     
     response = await call_next(request)
     
     end_time = time.perf_counter()
     total_time_ms = round((end_time - start_time) * 1000, 2)
-    
-    timing_message = f"TOTAL REQ-RES TIMING | method={request.method} | url={request.url.path} | total_time_ms={total_time_ms}"
+
+    timing_message = f"TOTAL REQ-RES TIMING | method={request.method} | url={request.url.path} | total_request_response_ms={total_time_ms}"
     request_logger.info(timing_message)
     print(timing_message)
     
@@ -66,23 +66,24 @@ def validate_pdf_file(file: UploadFile, contents: bytes) -> None:
     try:
         doc = fitz.open(stream=contents, filetype="pdf")
     except Exception as e:
+        app_logger.error(f"PDF validation failed: {str(e)}")
         raise HTTPException(
             status_code=400,
             detail={
                 "code": "INVALID_PDF",
-                "message": "File is not a valid PDF or is corrupted"
+                "message": f"File is not a valid PDF or is corrupted: {str(e)}"
             }
         )
     
     page_count = len(doc)
     doc.close()
     
-    if page_count != REQUIRED_PAGE_COUNT:
+    if page_count != 3:
         raise HTTPException(
             status_code=400,
             detail={
                 "code": "INVALID_PAGE_COUNT",
-                "message": f"PDF must have exactly {REQUIRED_PAGE_COUNT} pages, found {page_count} pages"
+                "message": f"PDF must have exactly 3 pages, found {page_count} pages"
             }
         )
     
@@ -112,57 +113,49 @@ def compare_faces_from_pdf(pdf_bytes: bytes, rekognition_client=None, resize_wid
             img = img.resize((resize_width, h_size), Image.LANCZOS)
             img_list.append(img)
 
-        total_width = img_list[0].width + img_list[1].width
-        max_height = max(img_list[0].height, img_list[1].height)
-        combined = Image.new('RGB', (total_width, max_height), (255, 255, 255))
-        combined.paste(img_list[0], (0, 0))
-        combined.paste(img_list[1], (img_list[0].width, 0))
+        doc.close()
+
+        img_bytes = []
+        for idx, img in enumerate(img_list):
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG")
+            byte_data = buf.getvalue()
+            img_bytes.append(byte_data)
 
         t1 = time.perf_counter()
-        buf = io.BytesIO()
-        combined.save(buf, format="JPEG")
-        combined_bytes = buf.getvalue()
-
-        response = rekognition_client.detect_faces(Image={'Bytes': combined_bytes}, Attributes=['DEFAULT'])
-        faces = response.get("FaceDetails", [])
-        if len(faces) < 2:
-            raise ValueError("Expected 2 faces but found less.")
-
-        app_logger.info(f"Face detection on combined Page 2+3 image took {round((time.perf_counter() - t1) * 1000, 2)} ms")
-
-        w, h = combined.size
-        face_crops = []
-        for face in faces[:2]:
-            box = face["BoundingBox"]
-            left = int(box["Left"] * w)
-            top = int(box["Top"] * h)
-            right = left + int(box["Width"] * w)
-            bottom = top + int(box["Height"] * h)
-            crop = combined.crop((left, top, right, bottom))
-            crop_buf = io.BytesIO()
-            crop.save(crop_buf, format="JPEG")
-            face_crops.append(crop_buf.getvalue())
-
+        result = rekognition_client.compare_faces(
+            SourceImage={'Bytes': img_bytes[0]},
+            TargetImage={'Bytes': img_bytes[1]},
+            SimilarityThreshold=FACE_SIMILARITY_THRESHOLD * 100
+        )
         t2 = time.perf_counter()
-        result = rekognition_client.compare_faces(SourceImage={'Bytes': face_crops[0]}, TargetImage={'Bytes': face_crops[1]}, SimilarityThreshold=FACE_SIMILARITY_THRESHOLD * 100)
-        similarity = result['FaceMatches'][0]['Similarity'] if result['FaceMatches'] else 0.0
 
-        app_logger.info(f"Face comparison took {round((time.perf_counter() - t2) * 1000, 2)} ms")
+        if result['FaceMatches']:
+            similarity = result['FaceMatches'][0]['Similarity']
+            app_logger.info(f"AWS Rekognition face similarity: {similarity:.2f}")
+        else:
+            similarity = 0.0
+            app_logger.warning("No face match found by Rekognition")
+
+        latency_metrics = {
+            "image_preprocessing": round((t1 - start_time) * 1000, 2),
+            "face_comparison": round((time.perf_counter() - t1) * 1000, 2),
+            "total": round((time.perf_counter() - start_time) * 1000, 2)
+        }
+
+        app_logger.info(f"Latency (ms): image_preprocessing={latency_metrics['image_preprocessing']}ms, "
+                        f"rekognition_face_comparison={latency_metrics['face_comparison']}ms, total={latency_metrics['total']}ms")
 
         return {
             "similarity": round(similarity, 2),
-            "latency_ms": {
-                "image_preprocessing": round((t1 - start_time) * 1000, 2),
-                "face_detection": round((t2 - t1) * 1000, 2),
-                "face_comparison": round((time.perf_counter() - t2) * 1000, 2),
-                "total": round((time.perf_counter() - start_time) * 1000, 2)
-            }
+            "latency_ms": latency_metrics
         }
 
     except Exception as e:
+        app_logger.error(f"Face comparison failed: {e}")
         raise RuntimeError(f"Face comparison failed: {e}")
 
-def process_kyc_pdf(pdf_bytes: bytes, rekognition_client=None) -> dict:
+def compare_texts_from_pdf(pdf_bytes: bytes, rekognition_client=None) -> dict:
     start_time = time.perf_counter()
     if rekognition_client is None:
         rekognition_client = boto3.client("rekognition", region_name="us-east-1")
@@ -172,7 +165,6 @@ def process_kyc_pdf(pdf_bytes: bytes, rekognition_client=None) -> dict:
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     form_text = doc[0].get_text()
     latencies['form_extraction_ms'] = round((time.perf_counter() - t0) * 1000, 2)
-    app_logger.info(f"Page 1 extracted text in {latencies['form_extraction_ms']} ms")
 
     form_patterns = {
         "pan_number": r"PAN NUMBER\s+([A-Z]{5}[0-9]{4}[A-Z])",
@@ -182,6 +174,11 @@ def process_kyc_pdf(pdf_bytes: bytes, rekognition_client=None) -> dict:
     }
     form_data = {field: (match.group(1).strip() if (match := re.search(pattern, form_text)) else None)
                  for field, pattern in form_patterns.items()}
+    
+    print("EXTRACTED FORM DATA (Pattern Matched)")
+    for field, value in form_data.items():
+        print(f"{field}: {value}")
+
 
     page_2 = doc[1]
     images = page_2.get_images(full=True)
@@ -198,8 +195,6 @@ def process_kyc_pdf(pdf_bytes: bytes, rekognition_client=None) -> dict:
     h_size = int(img.size[1] * w_percent)
     img = img.resize((resize_width, h_size), Image.LANCZOS)
     
-    app_logger.info(f"Page 2 image processed and resized (size: {img.size})")
-    
     buf = io.BytesIO()
     img.save(buf, format="JPEG")
     image_bytes = buf.getvalue()
@@ -208,7 +203,6 @@ def process_kyc_pdf(pdf_bytes: bytes, rekognition_client=None) -> dict:
     t1 = time.perf_counter()
     response = rekognition_client.detect_text(Image={"Bytes": image_bytes})
     latencies['rekognition_ocr_ms'] = round((time.perf_counter() - t1) * 1000, 2)
-    app_logger.info(f"Page 2 OCR completed in {latencies['rekognition_ocr_ms']} ms")
 
     text_lines = [d["DetectedText"] for d in response["TextDetections"] if d["Type"] == "LINE"]
     full_text = "\n".join(text_lines)
@@ -221,6 +215,10 @@ def process_kyc_pdf(pdf_bytes: bytes, rekognition_client=None) -> dict:
     }
     pan_data = {field: (match.group(1).strip() if (match := re.search(pattern, full_text, flags=re.IGNORECASE)) else None)
                 for field, pattern in pan_patterns.items()}
+    
+    print("EXTRACTED PAN DATA (From OCR)")
+    for field, value in pan_data.items():
+        print(f"{field}: {value}")
 
     t2 = time.perf_counter()
     def name_score(n1, n2):
@@ -237,14 +235,18 @@ def process_kyc_pdf(pdf_bytes: bytes, rekognition_client=None) -> dict:
         comparison[key] = 100.0 if val1 and val2 and val1.upper() == val2.upper() else round(fuzz.ratio(val1, val2), 2)
 
     latencies['comparison_ms'] = round((time.perf_counter() - t2) * 1000, 2)
-    app_logger.info(f"Text comparison completed in {latencies['comparison_ms']} ms")
+
+    total_latency = round((time.perf_counter() - start_time) * 1000, 2)
+    app_logger.info(f"Latency (ms): form_extraction={latencies['form_extraction_ms']}ms, "
+                    f"rekognition_ocr={latencies['rekognition_ocr_ms']}ms, "
+                    f"comparison={latencies['comparison_ms']}ms, total={total_latency}ms")
 
     return {
         "form_data": form_data,
         "pan_data": pan_data,
         "match_scores": comparison,
         "latency_ms": latencies,
-        "total": round((time.perf_counter() - start_time) * 1000, 2)
+        "total": total_latency
     }
 
 async def run_parallel(pdf_bytes: bytes, pdf_path: str):
@@ -252,7 +254,7 @@ async def run_parallel(pdf_bytes: bytes, pdf_path: str):
     loop = asyncio.get_running_loop()
     executor = ThreadPoolExecutor(max_workers=2)
 
-    kyc_future = loop.run_in_executor(executor, process_kyc_pdf, pdf_bytes, rekognition_client)
+    kyc_future = loop.run_in_executor(executor, compare_texts_from_pdf, pdf_bytes, rekognition_client)
     face_future = loop.run_in_executor(executor, compare_faces_from_pdf, pdf_bytes, rekognition_client)
     kyc_result, face_result = await asyncio.gather(kyc_future, face_future)
     return {"kyc_validation": kyc_result, "face_similarity": face_result}
@@ -266,7 +268,7 @@ async def health_check():
     }
 
 @app.post("/v1/validate-application")
-async def validate_application(file: UploadFile = File(...), application_id: str = None):
+async def validate_application(request: Request, file: UploadFile = File(...), application_id: str = None):
     application_id = application_id or f"APP-{random.randint(10000, 99999)}"
     request_logger.info(f"START request | file={file.filename} | application_id={application_id}")
 
@@ -293,12 +295,13 @@ async def validate_application(file: UploadFile = File(...), application_id: str
                 })
 
         face_pass = face["similarity"] >= (FACE_SIMILARITY_THRESHOLD * 100)
-        total_processing_ms = round((end - start) * 1000, 2)
-        app_logger.info(f"Total processing time: {total_processing_ms} ms")
+        parallel_processing_ms = round((end - start) * 1000, 2)
+        total_processing_ms = round((time.perf_counter() - request.state.start_time) * 1000, 2)
+        app_logger.info(f"Total function processing time: {parallel_processing_ms} ms")
 
         metrics = {
             "processing_ms": total_processing_ms,
-            "ocr_ms": kyc["latency_ms"].get("rekognition_ocr_ms", 0),
+            "ocr_ms": kyc.get("total", 0),
             "face_match_ms": face["latency_ms"].get("total", 0)
         }
 
@@ -315,6 +318,10 @@ async def validate_application(file: UploadFile = File(...), application_id: str
         request_logger.info(f"END request | result={response_data}")
         return response_data
 
+    except HTTPException as he:
+        request_logger.error(f"Validation error | application_id={application_id} | error={he.detail}")
+        raise he
     except Exception as e:
-        request_logger.error(f"ERROR processing | application_id={application_id} | error={str(e)}")
-        raise HTTPException(status_code=500, detail={"code": "PROCESSING_FAILED", "message": str(e)})
+        error_message = str(e) if str(e) else "Unknown processing error occurred"
+        request_logger.error(f"ERROR processing | application_id={application_id} | error={error_message}")
+        raise HTTPException(status_code=500, detail={"code": "PROCESSING_FAILED", "message": error_message})

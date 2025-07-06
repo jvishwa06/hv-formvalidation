@@ -12,7 +12,6 @@ A FastAPI-based application for validating PDF form applications using AWS Rekog
 - PDF document validation with 3-page requirement
 - Facial recognition using AWS Rekognition
 - Text similarity validation using fuzzy matching
-- Name parsing and validation
 - Asynchronous processing for better performance
 - Docker containerization for easy deployment
 
@@ -38,15 +37,7 @@ cd hvformvalidation
 pip install -r requirements.txt
 ```
 
-### 3. Configure AWS Credentials
-
-```bash
-aws configure
-```
-
-Enter your AWS Access Key ID, Secret Access Key, and preferred region (us-east-1).
-
-### 4. Run Locally
+### 3. Run Locally
 
 ```bash
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
@@ -54,14 +45,14 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 The API will be available at `http://localhost:8000`
 
-### 5. Test Local API
+### 4. Test Local API
 
 ```bash
 curl -X POST http://localhost:8000/v1/validate-application \
   -F "file=@sample3.pdf"
 ```
 
-### 6. API Documentation
+### 5. API Documentation
 
 Visit `http://localhost:8000/docs` for interactive API documentation.
 
@@ -80,7 +71,9 @@ Visit `http://localhost:8000/docs` for interactive API documentation.
    aws configure
    ```
 
-### 2. Deploy to AWS Lambda
+   Enter your AWS Access Key ID, Secret Access Key, and preferred region (us-east-1).
+
+### 2. Push Docker Image to AWS ECR
 
 1. **Make deploy script executable:**
    ```bash
@@ -199,7 +192,6 @@ Validates a PDF application form.
 
 - `AWS_REGION`: AWS region (default: us-east-1)
 - `MAX_FILE_SIZE_MB`: Maximum file size in MB (default: 10)
-- `REQUIRED_PAGE_COUNT`: Required number of pages (default: 3)
 - `TEXT_SIMILARITY_THRESHOLD`: Text similarity threshold (default: 80)
 - `FACE_SIMILARITY_THRESHOLD`: Face similarity threshold (default: 0.7)
 
@@ -215,11 +207,7 @@ Validates a PDF application form.
    - Ensure Docker is running
    - Check platform compatibility (linux/amd64)
 
-3. **Lambda Timeout:**
-   - Increase Lambda timeout to 30 seconds
-   - Increase memory allocation to 512MB+
-
-4. **PDF Processing Errors:**
+3. **PDF Processing Errors:**
    - Ensure PDF has exactly 3 pages
    - Check file size (max 10MB)
    - Verify PDF contains readable text and images
