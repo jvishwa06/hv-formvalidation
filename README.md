@@ -1,10 +1,12 @@
-# Form Validator API
+# Account Opening Form Verification API
 
-A FastAPI-based application for validating PDF form applications using AWS Rekognition for facial recognition and document processing. The API validates application forms by comparing face images within the document and checking text consistency.
+A FastAPI-based application that validates customer onboarding application forms using AWS Rekognition for face comparison and document OCR. It performs two primary validations:
+Data-to-Document Match – Validates that typed form fields match the printed data on the PAN card image.
+Face-to-Face Match – Verifies that the face on the PAN card matches the selfie image.
 
 ## Architecture
 
-![Architecture Diagram](./architecture.png)
+![Architecture Diagram](./loadtests/architecture.png)
 
 ## Features
 
@@ -13,6 +15,65 @@ A FastAPI-based application for validating PDF form applications using AWS Rekog
 - Text similarity validation using fuzzy matching
 - Asynchronous processing for better performance
 - Docker containerization for easy deployment
+
+## Tech Stack
+
+- **AWS Rekognition** - OCR and face comparison services
+- **RapidFuzz** - Fast string matching for name consistency validation
+- **PyMuPDF** - PDF document processing and manipulation
+- **FastAPI** - High-performance web framework for building APIs
+- **Docker** - Containerization for consistent deployment
+- **AWS ECR** - Docker container registry for image storage and management
+- **AWS Lambda** - Serverless compute platform
+- **AWS CloudWatch** - Logging and monitoring services
+
+## Experimentation and Technology Choices
+
+### 1. Initial OCR and Face Recognition Testing
+
+**Technology Evaluation: EasyOCR vs pytesseract + facenet vs face_recognition library**
+- **OCR Comparison:** 
+  - EasyOCR: Higher latency compared to pytesseract
+  - pytesseract: Achieved ~1.5 second latency for text extraction (chosen for better performance)
+- **Face Recognition Comparison:**
+  - facenet: Higher latency compared to face_recognition library
+  - face_recognition library: Provided <1 second latency for face matching (chosen for better performance)
+- **Major Issue:** face_recognition library was difficult to setup due to heavy C++ compilation requirements in Linux environments, making deployment challenging
+
+### 2. Handling Rotated and Skewed Documents
+
+**Challenge:** pytesseract and Haar cascade for face detection struggled with rotated and skewed PAN card images
+
+**Initial Approach - OpenCV Contours:**
+- Attempted to use OpenCV contours for ID card detection
+- **Issues:** Did not work reliably across different surfaces and backgrounds, required separate threshold adjustments for each scenario
+
+**Final Solution for OCR:**
+- Trained a custom YOLO model for ID card detection 
+- Detected, cropped, and rotated the ID card before feeding to pytesseract for accurate text extraction
+- **Limitation:** Could not accurately determine the correct rotation angle for optimal text orientation
+
+**Solution for Face Detection:** Replaced Haar cascade with YOLO-FaceV11 model for better face detection in unclear, skewed, and rotated images (latency: <80ms)
+
+### 3. AWS Rekognition Adoption
+
+**After extensive exploration, migrated to AWS Rekognition for both OCR and face comparison:**
+- **Performance:** Low latency for both text extraction and face comparison
+- **Robustness:** Handles rotated texts and faces effectively
+- **Quality:** Works well with low-quality images
+- **Cost-Effective:** Low per-request pricing model
+- **Reliability:** Managed service with high availability
+
+### 4. Deployment Strategy Evolution
+
+**From EC2 to AWS Lambda:**
+- **EC2 Limitations:** Inefficient and costly when instances are idle
+- **Lambda Benefits:**
+  - Serverless compute - runs only on user requests
+  - Creates new instances for each user request
+  - Instances live only for the execution duration
+  - Pay-per-use pricing model (charged only for actual running time)
+  - Automatic scaling and management
 
 ## Prerequisites
 
@@ -161,7 +222,7 @@ Monitor the following metrics:
 
 ### 6. Load Test Results for 10 Concurrent Users
 
-![Load Test Results - 10 Concurrent Users](./loadtest10.png)
+![Load Test Results - 10 Concurrent Users](./loadtests/loadtest10.png)
 
 ## API Endpoints
 

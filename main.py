@@ -9,14 +9,13 @@ import asyncio
 from mangum import Mangum
 from PIL import Image
 from datetime import datetime, timezone
-from nameparser import HumanName
 from rapidfuzz import fuzz
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from concurrent.futures import ThreadPoolExecutor
 from logging import StreamHandler
 
 MAX_FILE_SIZE_MB = 10
-TEXT_SIMILARITY_THRESHOLD = 80
+TEXT_SIMILARITY_THRESHOLD = 95
 FACE_SIMILARITY_THRESHOLD = 0.7
 
 formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
@@ -174,11 +173,6 @@ def compare_texts_from_pdf(pdf_bytes: bytes, rekognition_client=None) -> dict:
     }
     form_data = {field: (match.group(1).strip() if (match := re.search(pattern, form_text)) else None)
                  for field, pattern in form_patterns.items()}
-    
-    print("EXTRACTED FORM DATA (Pattern Matched)")
-    for field, value in form_data.items():
-        print(f"{field}: {value}")
-
 
     page_2 = doc[1]
     images = page_2.get_images(full=True)
@@ -215,28 +209,19 @@ def compare_texts_from_pdf(pdf_bytes: bytes, rekognition_client=None) -> dict:
     }
     pan_data = {field: (match.group(1).strip() if (match := re.search(pattern, full_text, flags=re.IGNORECASE)) else None)
                 for field, pattern in pan_patterns.items()}
-    
-    print("EXTRACTED PAN DATA (From OCR)")
-    for field, value in pan_data.items():
-        print(f"{field}: {value}")
 
     t2 = time.perf_counter()
-    def name_score(n1, n2):
-        if not n1 or not n2:
+    
+    def match_names_order_sensitive(name1, name2):
+        if not name1 or not name2:
             return 0.0
-
-        hn1, hn2 = HumanName(n1.upper().strip()), HumanName(n2.upper().strip())
-        fn1, ln1 = hn1.first, hn1.last
-        fn2, ln2 = hn2.first, hn2.last
-
-        first_score = fuzz.partial_ratio(fn1, fn2)
-        last_score = fuzz.partial_ratio(ln1, ln2)
-
-        return round((0.4 * first_score) + (0.6 * last_score), 2)
+        name1 = name1.upper().strip()
+        name2 = name2.upper().strip()
+        return fuzz.ratio(name1, name2)
 
     comparison = {}
     for key in ["full_name", "father_name"]:
-        comparison[key] = name_score(form_data.get(key, ""), pan_data.get(key, ""))
+        comparison[key] = match_names_order_sensitive(form_data.get(key, ""), pan_data.get(key, ""))
     for key in ["pan_number", "dob"]:
         val1, val2 = form_data.get(key, ""), pan_data.get(key, "")
         comparison[key] = 100.0 if val1 and val2 and val1.upper() == val2.upper() else 0.0
