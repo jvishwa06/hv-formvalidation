@@ -100,8 +100,7 @@ Visit `http://localhost:8000/docs` for interactive API documentation.
    - Container image URI: (use the URI from deploy.sh output)
    - Architecture: x86_64
 3. **Configure Function:**
-   - Runtime: Python 3.10 (automatically detected)
-   - Timeout: 30 seconds (recommended)
+   - Timeout: 10 seconds
    - Memory: 512 MB (minimum recommended)
 4. **Enable Function URL:**
    - Go to Configuration → Function URL

@@ -2,7 +2,7 @@
 set -e
 
 AWS_REGION="us-east-1"
-REPO_NAME="form-validation-ecr"
+REPO_NAME="form-validation-ecr-v1"
 IMAGE_TAG="latest"
 
 export DOCKER_DEFAULT_PLATFORM=linux/amd64

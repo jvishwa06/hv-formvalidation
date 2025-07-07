@@ -224,15 +224,22 @@ def compare_texts_from_pdf(pdf_bytes: bytes, rekognition_client=None) -> dict:
     def name_score(n1, n2):
         if not n1 or not n2:
             return 0.0
+
         hn1, hn2 = HumanName(n1.upper().strip()), HumanName(n2.upper().strip())
-        return round(fuzz.partial_ratio(f"{hn1.first} {hn1.last}".strip(), f"{hn2.first} {hn2.last}".strip()), 2)
+        fn1, ln1 = hn1.first, hn1.last
+        fn2, ln2 = hn2.first, hn2.last
+
+        first_score = fuzz.partial_ratio(fn1, fn2)
+        last_score = fuzz.partial_ratio(ln1, ln2)
+
+        return round((0.4 * first_score) + (0.6 * last_score), 2)
 
     comparison = {}
     for key in ["full_name", "father_name"]:
         comparison[key] = name_score(form_data.get(key, ""), pan_data.get(key, ""))
     for key in ["pan_number", "dob"]:
         val1, val2 = form_data.get(key, ""), pan_data.get(key, "")
-        comparison[key] = 100.0 if val1 and val2 and val1.upper() == val2.upper() else round(fuzz.ratio(val1, val2), 2)
+        comparison[key] = 100.0 if val1 and val2 and val1.upper() == val2.upper() else 0.0
 
     latencies['comparison_ms'] = round((time.perf_counter() - t2) * 1000, 2)
 
@@ -285,7 +292,11 @@ async def validate_application(request: Request, file: UploadFile = File(...), a
         field_matches, field_pass, errors = {}, True, []
 
         for key, score in kyc["match_scores"].items():
-            is_pass = score >= TEXT_SIMILARITY_THRESHOLD
+            if key in ["dob", "pan_number"]:
+                is_pass = score == 100.0
+            else:
+                is_pass = score >= TEXT_SIMILARITY_THRESHOLD
+            
             field_matches[key] = {"score": score, "pass": is_pass}
             if not is_pass:
                 field_pass = False
