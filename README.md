@@ -160,6 +160,10 @@ Monitor the following metrics:
 - **Throughput:** Requests per second
 - **Error Rate:** Monitor for timeout and memory errors
 
+### 6. Load Test Results
+
+![Load Test Results - 10 Concurrent Users](./loadtest10.png)
+
 ## API Endpoints
 
 ### POST /v1/validate-application

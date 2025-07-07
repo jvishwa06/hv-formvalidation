@@ -27,3 +27,4 @@ class FormValidatorUser(HttpUser):
 
 
 # locust -f locustfile.py --host=https://jnozfnu4em3xc2z2tv26vbq3xi0rjycr.lambda-url.us-east-1.on.aws
+# curl -X POST https://jnozfnu4em3xc2z2tv26vbq3xi0rjycr.lambda-url.us-east-1.on.aws/v1/validate-application -F "file=@sample3.pdf"
