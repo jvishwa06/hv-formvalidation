@@ -5,7 +5,6 @@ A FastAPI-based application for validating PDF form applications using AWS Rekog
 ## Architecture
 
 ![Architecture Diagram](./architecture.png)
-*Architecture diagram showing the API workflow, AWS services integration, and processing pipeline*
 
 ## Features
 
