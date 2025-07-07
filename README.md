@@ -48,14 +48,14 @@ Face-to-Face Match – Verifies that the face on the PAN card matches the selfie
 - Attempted to use OpenCV contours for ID card detection
 - **Issues:** Did not work reliably across different surfaces and backgrounds, required separate threshold adjustments for each scenario
 
-**Final Solution for OCR:**
+**Solution for OCR:**
 - Trained a custom YOLO model for ID card detection 
 - Detected, cropped, and rotated the ID card before feeding to pytesseract for accurate text extraction
 - **Limitation:** Could not accurately determine the correct rotation angle for optimal text orientation
 
 **Solution for Face Detection:** Replaced Haar cascade with YOLO-FaceV11 model for better face detection in unclear, skewed, and rotated images (latency: <80ms)
 
-### 3. AWS Rekognition Adoption
+### 3. AWS Rekognition for OCR & Face Match
 
 **After extensive exploration, migrated to AWS Rekognition for both OCR and face comparison:**
 - **Performance:** Low latency for both text extraction and face comparison
@@ -78,8 +78,9 @@ Face-to-Face Match – Verifies that the face on the PAN card matches the selfie
 ## Prerequisites
 
 - Python 3.10+
-- Docker
-- AWS CLI
+- Docker and Docker Buildx
+- AWS CLI configured with appropriate credentials
+- jq (JSON processor) - Install with `brew install jq` on macOS
 - AWS Account with appropriate permissions
 
 ## Local Development
@@ -123,7 +124,7 @@ Visit `http://localhost:8000/docs` for interactive API documentation.
 1. **Login to AWS Console**
 2. **Create IAM User** with the following policies:
    - `AmazonRekognitionFullAccess`
-   - `AWSLambdaExecute`
+   - `AWSLambda_FullAccess`
    - `AmazonEC2ContainerRegistryFullAccess`
 3. **Generate Access Key and Secret Key** for the IAM user
 4. **Configure AWS CLI:**
@@ -133,47 +134,52 @@ Visit `http://localhost:8000/docs` for interactive API documentation.
 
    Enter your AWS Access Key ID, Secret Access Key, and preferred region (us-east-1).
 
-### 2. Push Docker Image to AWS ECR
+### 2. Automated Deployment with Single Command
+
+The deployment script has been optimized for a streamlined experience:
 
 1. **Make deploy script executable:**
    ```bash
    chmod +x deploy.sh
    ```
 
-2. **Run deployment script:**
+2. **Run the automated deployment:**
    ```bash
    ./deploy.sh
    ```
 
-   This script will:
-   - Create ECR repository
-   - Build Docker image for linux/amd64 platform
-   - Push image to ECR
-   - Output the image URI for Lambda function creation
+   The script will automatically handle:
+   - **Dependency checks** - Verifies jq and AWS CLI are installed
+   - **Docker image build** - Creates optimized linux/amd64 container image
+   - **ECR management** - Creates repository if needed and pushes image
+   - **Image digest retrieval** - Gets the latest image digest for Lambda deployment
+   - **Lambda function creation** - Deploys with optimized settings (10s timeout, 128MB memory)
+   - **Function URL configuration** - Sets up public HTTPS endpoint with CORS
+   - **Permission management** - Configures public access permissions
 
-### 3. Create Lambda Function
+3. **Deployment output:**
+   ```
+   ✅ Deployment completed successfully!
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Function URL: https://xyz.lambda-url.us-east-1.on.aws/
+    Function Name: form-validator-api-final-check
+    Region: us-east-1
+    Memory: 128 MB | Timeout: 10s
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   
+   Test your API: curl https://xyz.lambda-url.us-east-1.on.aws/
+   ```
 
-1. **Go to AWS Lambda Console**
-2. **Create Function:**
-   - Choose "Container image"
-   - Function name: `form-validator-api`
-   - Container image URI: (use the URI from deploy.sh output)
-   - Architecture: x86_64
-3. **Configure Function:**
-   - Timeout: 10 seconds
-   - Memory: 128
-4. **Enable Function URL:**
-   - Go to Configuration → Function URL
-   - Create function URL
-   - Auth type: NONE
-   - CORS: Enable if needed for web applications
+### 3. Test Deployed API
 
-### 4. Test Deployed API
+After successful deployment, the script will display your Function URL. Test your API immediately:
 
 ```bash
-curl -X POST https://your-function-url.lambda-url.us-east-1.on.aws/prod/v1/validate-application \
+curl -X POST https://your-function-url.lambda-url.us-east-1.on.aws/v1/validate-application \
   -F "file=@sample3.pdf"
 ```
+
+**Note:** Replace `your-function-url` with the actual URL provided in the deployment output.
 
 ## Load Testing
 
@@ -202,7 +208,7 @@ locust -f locustfile.py --host=https://your-function-url.lambda-url.us-east-1.on
 ### 3. Load Test Configuration
 
 - **Web UI:** Open `http://localhost:8089`
-- **Users:** Start with 10-50 concurrent users
+- **Users:** Start with 10-20 concurrent users
 - **Spawn Rate:** 5 users per second
 - **Test Duration:** 5-10 minutes for initial testing
 
@@ -232,18 +238,42 @@ Validates a PDF application form.
 
 **Request:**
 - Content-Type: `multipart/form-data`
-- Body: PDF file (max 10MB)
+- Body: PDF file (exactly 3 pages, max 10MB)
 
 **Response:**
 ```json
 {
-  "is_valid": true,
-  "confidence_score": 0.85,
-  "validation_details": {
-    "page_count": 3,
-    "face_match_confidence": 0.92,
-    "name_consistency": true,
-    "processing_time": 2.34
+  "application_id": "APP-61640",
+  "field_matches": {
+    "full_name": {
+      "score": 100,
+      "pass": true
+    },
+    "father_name": {
+      "score": 100,
+      "pass": true
+    },
+    "pan_number": {
+      "score": 100,
+      "pass": true
+    },
+    "dob": {
+      "score": 100,
+      "pass": true
+    }
+  },
+  "field_pass": true,
+  "face_match": {
+    "similarity": 99.99,
+    "pass": true
+  },
+  "overall_pass": true,
+  "errors": [],
+  "processed_at": "2025-07-07T11:53:49.589947+00:00",
+  "metrics": {
+    "processing_ms": 2437.38,
+    "ocr_ms": 2182.03,
+    "face_match_ms": 1608.57
   }
 }
 ```
@@ -262,12 +292,14 @@ Validates a PDF application form.
 ### Common Issues
 
 1. **AWS Credentials Error:**
-   - Ensure AWS CLI is configured correctly
+   - Ensure AWS CLI is configured correctly: `aws configure`
    - Verify IAM user has required permissions
+   - Check if AWS region is set properly
 
 2. **Docker Build Issues:**
-   - Ensure Docker is running
+   - Ensure Docker is running: `docker --version`
    - Check platform compatibility (linux/amd64)
+   - Verify Docker Buildx is available: `docker buildx version`
 
 3. **PDF Processing Errors:**
    - Ensure PDF has exactly 3 pages
@@ -276,6 +308,7 @@ Validates a PDF application form.
 
 ### Logs and Monitoring
 
-- **Local:** Check console output
-- **Lambda:** Monitor CloudWatch logs
-- **Load Testing:** Review Locust web interface metrics
+- **Local Development:** Check console output in terminal
+- **Lambda Deployment:** Monitor CloudWatch logs in AWS Console
+- **Load Testing:** Review Locust web interface metrics at `http://localhost:8089`
+- **Deployment Issues:** Check deploy script output for detailed error messages
