@@ -100,7 +100,7 @@ Visit `http://localhost:8000/docs` for interactive API documentation.
    - Architecture: x86_64
 3. **Configure Function:**
    - Timeout: 10 seconds
-   - Memory: 512 MB (minimum recommended)
+   - Memory: 128
 4. **Enable Function URL:**
    - Go to Configuration → Function URL
    - Create function URL
@@ -158,9 +158,8 @@ Monitor the following metrics:
 - **Response Time:** Should be < 5 seconds for PDF processing
 - **Success Rate:** Should be > 95%
 - **Throughput:** Requests per second
-- **Error Rate:** Monitor for timeout and memory errors
 
-### 6. Load Test Results
+### 6. Load Test Results for 10 Concurrent Users
 
 ![Load Test Results - 10 Concurrent Users](./loadtest10.png)
 
